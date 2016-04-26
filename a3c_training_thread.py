@@ -4,23 +4,25 @@ import numpy as np
 import random
 
 from accum_trainer import AccumTrainer
-from rmsprop_applier import RMSPropApplier
-
 from maze_state import MazeState
+from game_state import GameState
+from game_state import ACTION_SIZE
 from game_ac_network import GameACNetwork
 
 from constants import GAMMA
 from constants import LOCAL_T_MAX
-from constants import RMSP_EPSILON
 from constants import ENTROPY_BETA
 from constants import ACTION_SIZE
-
+from constants import GRAD_NORM_CLIP
 
 class A3CTrainingThread(object):
-  def __init__(self, thread_index, global_network, initial_learning_rate, max_global_time_step):
+  def __init__(self, thread_index, global_network, initial_learning_rate,
+               learning_rate_input,
+               policy_applier, value_applier,
+               max_global_time_step):
 
     self.thread_index = thread_index
-    self.learning_rate_input = tf.placeholder("float")
+    self.learning_rate_input = learning_rate_input
     self.max_global_time_step = max_global_time_step
 
     self.local_network = GameACNetwork(ACTION_SIZE)
@@ -29,30 +31,26 @@ class A3CTrainingThread(object):
     # policy
     self.policy_trainer = AccumTrainer()
     self.policy_trainer.prepare_minimize( self.local_network.policy_loss,
-                                          self.local_network.get_policy_vars() )
+                                          self.local_network.get_policy_vars(),
+                                          GRAD_NORM_CLIP )
+    
     self.policy_accum_gradients = self.policy_trainer.accumulate_gradients()
     self.policy_reset_gradients = self.policy_trainer.reset_gradients()
   
-    self.policy_applier = RMSPropApplier(learning_rate = self.learning_rate_input,
-                                         decay = 0.99,
-                                         momentum = 0.0,
-                                         epsilon = RMSP_EPSILON )
-    self.policy_apply_gradients = self.policy_applier.apply_gradients(
+    self.policy_apply_gradients = policy_applier.apply_gradients(
         global_network.get_policy_vars(),
         self.policy_trainer.get_accum_grad_list() )
 
     # value
     self.value_trainer = AccumTrainer()
     self.value_trainer.prepare_minimize( self.local_network.value_loss,
-                                         self.local_network.get_value_vars() )
+                                         self.local_network.get_value_vars(),
+                                         GRAD_NORM_CLIP )
     self.value_accum_gradients = self.value_trainer.accumulate_gradients()
     self.value_reset_gradients = self.value_trainer.reset_gradients()
   
-    self.value_applier = RMSPropApplier(learning_rate = self.learning_rate_input,
-                                        decay = 0.99,
-                                        momentum = 0.0,
-                                        epsilon = RMSP_EPSILON )
-    self.value_apply_gradients = self.value_applier.apply_gradients(
+
+    self.value_apply_gradients = value_applier.apply_gradients(
         global_network.get_value_vars(),
         self.value_trainer.get_accum_grad_list() )
     
@@ -65,6 +63,11 @@ class A3CTrainingThread(object):
     self.initial_learning_rate = initial_learning_rate
 
     self.episode_reward = 0
+
+    # thread0 will record score for TensorBoard
+    if self.thread_index == 0:
+      self.score_input = tf.placeholder(tf.int32)
+      tf.scalar_summary("score", self.score_input)
 
   def _anneal_learning_rate(self, global_time_step):
     learning_rate = self.initial_learning_rate * (self.max_global_time_step - global_time_step) / self.max_global_time_step
@@ -86,8 +89,14 @@ class A3CTrainingThread(object):
         return i;
     #fail safe
     return len(values)-1
+
+  def _record_score(self, sess, summary_writer, summary_op, score, global_t):
+    summary_str = sess.run(summary_op, feed_dict={
+      self.score_input: score
+    })
+    summary_writer.add_summary(summary_str, global_t)
     
-  def process(self, sess, global_t):
+  def process(self, sess, global_t, summary_writer, summary_op):
     states = []
     actions = []
     rewards = []
@@ -137,6 +146,10 @@ class A3CTrainingThread(object):
       if terminal:
         terminal_end = True
         print "score=", self.episode_reward
+
+        if self.thread_index == 0:        
+          self._record_score(sess, summary_writer, summary_op, self.episode_reward, global_t)
+          
         self.episode_reward = 0
         break
 
@@ -144,7 +157,7 @@ class A3CTrainingThread(object):
     if not terminal_end:
       R = self.local_network.run_value(sess, self.game_state.s_t)
 
-    actions.reverse()      
+    actions.reverse()
     states.reverse()
     rewards.reverse()
     values.reverse()
@@ -208,3 +221,4 @@ class A3CTrainingThread(object):
     # 進んだlocal step数を返す
     diff_local_t = self.local_t - start_local_t
     return diff_local_t
+    
