@@ -4,8 +4,8 @@ import numpy as np
 import random
 
 from accum_trainer import AccumTrainer
-from game_state import GameState
-from game_state import ACTION_SIZE
+from gym_game_state import GameState
+from gym_game_state import ACTION_SIZE
 from game_ac_network import GameACNetwork
 
 from constants import GAMMA

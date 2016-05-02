@@ -6,7 +6,7 @@ import sys
 import matplotlib.pyplot as plt
 import random
 
-from game_state import GameState
+from ale_game_state import GameState
 from game_ac_network import GameACNetwork
 from a3c_training_thread import A3CTrainingThread
 from constants import ACTION_SIZE

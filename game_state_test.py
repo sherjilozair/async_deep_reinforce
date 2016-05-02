@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 
-from game_state import GameState
+from ale_game_state import GameState
 
 class TestSequenceFunctions(unittest.TestCase):
 
